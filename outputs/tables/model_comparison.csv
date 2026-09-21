@@ -1,0 +1,4 @@
+model,MAE,RMSE,R2
+persistence_baseline,0.5554,0.6765,0.3195
+ridge,0.5607,0.6899,0.2922
+random_forest,0.5954,0.7571,0.1477

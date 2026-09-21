@@ -1,0 +1,9 @@
+,year,yield_lag1_t_ha,temp_spring_C,precip_spring_mm,sun_spring_h,temp_winter_C,precip_winter_mm,yield_t_ha
+year,1.0,0.05,0.23,-0.15,0.37,0.37,0.0,0.08
+yield_lag1_t_ha,0.05,1.0,-0.23,0.0,-0.13,0.19,0.1,0.61
+temp_spring_C,0.23,-0.23,1.0,-0.2,0.5,0.35,0.22,-0.36
+precip_spring_mm,-0.15,0.0,-0.2,1.0,-0.55,0.02,0.37,-0.03
+sun_spring_h,0.37,-0.13,0.5,-0.55,1.0,0.1,-0.07,-0.14
+temp_winter_C,0.37,0.19,0.35,0.02,0.1,1.0,0.23,0.21
+precip_winter_mm,0.0,0.1,0.22,0.37,-0.07,0.23,1.0,-0.05
+yield_t_ha,0.08,0.61,-0.36,-0.03,-0.14,0.21,-0.05,1.0
