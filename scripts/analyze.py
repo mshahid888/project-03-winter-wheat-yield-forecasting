@@ -141,7 +141,7 @@ results = pd.DataFrame({
 results.to_csv(f"{TAB}/model_comparison.csv", index=False)
 print(results.to_string(index=False))
 
-# train/test timeline figure (Condition 3 requirement)
+# train/test timeline figure
 fig, ax = plt.subplots(figsize=(10, 2.2))
 ax.barh(["train"], [TEST_START - 2000], left=[2000], height=0.5, color="steelblue")
 ax.barh(["test"], [2025 - TEST_START + 1], left=[TEST_START], height=0.5, color="darkorange")

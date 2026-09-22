@@ -8,15 +8,22 @@ Reads:
 Writes:
   data/processed/wheat_yield_panel.csv
 
-Forecast framing (documented decision):
+Forecast framing:
   - Prediction date: 30 June of the harvest year (pre-harvest / early-season forecast).
   - Every climate feature may only use months whose data is known by 30 June:
       * spring window: March..June of the harvest year
       * winter window: October of the previous year .. February of the harvest year
-  - The leakage audit at the end of this script ASSERTS that no climate input
-    uses a month later than June of the harvest year.
 
-Leakage rules enforced:
+Leakage audit (see audit_feature_windows below):
+  The audit does NOT check a hardcoded list of months. It reads back, for every
+  feature actually built, the (calendar-year offset, month) pairs of the climate
+  rows that were aggregated into it, and asserts each pair is knowable by the
+  cutoff: either it belongs to an earlier calendar year, or it is month <= June
+  of the harvest year. Changing FEATURE_SPEC therefore changes what the audit
+  tests, and a window that reached past the cutoff would fail even if the
+  docstring still claimed otherwise.
+
+Structural leakage rules also asserted:
   - No current-year production, no current-year area (the yield table has no area
     column at all, so this is structural, not just a choice).
   - Only lagged yield (year-1) is used as an autoregressive feature.
@@ -84,11 +91,61 @@ def load_climate(var):
     return out
 
 
+SPRING_MONTHS = [3, 4, 5, 6]
+WINTER_MONTHS = [10, 11, 12, 1, 2]
+
+# The single source of truth for feature construction AND for the leakage audit:
+# (output column, DWD variable, harvest-year key, months, aggregation).
+FEATURE_SPEC = [
+    ("temp_spring_C",    "tm", "hyear_spring", SPRING_MONTHS, "mean"),
+    ("precip_spring_mm", "rr", "hyear_spring", SPRING_MONTHS, "sum"),
+    ("sun_spring_h",     "sd", "hyear_spring", SPRING_MONTHS, "sum"),
+    ("temp_winter_C",    "tm", "hyear_winter", WINTER_MONTHS, "mean"),
+    ("precip_winter_mm", "rr", "hyear_winter", WINTER_MONTHS, "sum"),
+]
+
+
 def window_stats(clim, var, year_key, months, agg):
     """Aggregate one variable over a month window into harvest-year rows."""
     sub = clim[clim["month"].isin(months)]
     g = sub.groupby(["state", year_key])[var]
     return g.agg(agg).reset_index()
+
+
+def observed_offsets(clim, year_key, months):
+    """The (calendar_year - harvest_year, month) pairs actually aggregated.
+
+    Read back from the climate frame that feeds the aggregation, not from a
+    literal: this is what makes the audit a check on the real construction.
+    """
+    sub = clim[clim["month"].isin(months)]
+    return set(zip((sub["year"] - sub[year_key]).astype(int), sub["month"].astype(int)))
+
+
+def audit_feature_windows(frames):
+    """Assert every month that entered a feature is knowable by the cutoff.
+
+    A (offset, month) pair is admissible iff the observation predates the
+    forecast date: either offset < 0 (an earlier calendar year, so complete),
+    or offset == 0 and month <= CUTOFF_MONTH (this harvest year, up to June).
+    Raises AssertionError naming the offending feature and month otherwise.
+    """
+    audited = []
+    for col, var, year_key, months, _agg in FEATURE_SPEC:
+        pairs = observed_offsets(frames[var], year_key, months)
+        assert pairs, f"{col}: no climate rows contributed - window is empty"
+        for off, month in sorted(pairs):
+            ok = off < 0 or (off == 0 and month <= CUTOFF_MONTH)
+            assert ok, (
+                f"LEAK in {col}: month {month:02d} of the harvest year "
+                f"(offset {off:+d}) is after the {CUTOFF_MONTH:02d}/30 cutoff")
+        latest_same_year = max([m for o, m in pairs if o == 0], default=None)
+        audited.append((col, var, sorted(pairs), latest_same_year))
+        print(f"  audit {col:<17s} <- {var} months "
+              f"{sorted({m for _, m in pairs})} "
+              f"offsets {sorted({o for o, _ in pairs})} "
+              f"latest harvest-year month {latest_same_year}")
+    return audited
 
 
 def main():
@@ -99,29 +156,21 @@ def main():
 
     # Harvest year for each climate row: spring months belong to the same year,
     # winter window Oct(year-1)..Feb(year) belongs to harvest year `year`.
-    for df in (tm, rr, sd):
+    frames = {"tm": tm, "rr": rr, "sd": sd}
+    for df in frames.values():
         df["hyear_spring"] = df["year"]                       # Mar..Jun of harvest year
         df["hyear_winter"] = np.where(df["month"] >= 10, df["year"] + 1, df["year"])
 
-    spring_months = [3, 4, 5, 6]
-    winter_months = [10, 11, 12, 1, 2]
+    # ---- leakage audit on the real windows, BEFORE anything is merged ----
+    print("leakage audit (reads back the months each feature actually used):")
+    audited = audit_feature_windows(frames)
 
     feats = y[["state", "year"]].drop_duplicates()
-    feats = feats.merge(window_stats(tm, "tm", "hyear_spring", spring_months, "mean")
-                        .rename(columns={"tm": "temp_spring_C", "hyear_spring": "year"}),
-                        on=["state", "year"])
-    feats = feats.merge(window_stats(rr, "rr", "hyear_spring", spring_months, "sum")
-                        .rename(columns={"rr": "precip_spring_mm", "hyear_spring": "year"}),
-                        on=["state", "year"])
-    feats = feats.merge(window_stats(sd, "sd", "hyear_spring", spring_months, "sum")
-                        .rename(columns={"sd": "sun_spring_h", "hyear_spring": "year"}),
-                        on=["state", "year"])
-    feats = feats.merge(window_stats(tm, "tm", "hyear_winter", winter_months, "mean")
-                        .rename(columns={"tm": "temp_winter_C", "hyear_winter": "year"}),
-                        on=["state", "year"])
-    feats = feats.merge(window_stats(rr, "rr", "hyear_winter", winter_months, "sum")
-                        .rename(columns={"rr": "precip_winter_mm", "hyear_winter": "year"}),
-                        on=["state", "year"])
+    for col, var, year_key, months, agg in FEATURE_SPEC:
+        feats = feats.merge(
+            window_stats(frames[var], var, year_key, months, agg)
+            .rename(columns={var: col, year_key: "year"}),
+            on=["state", "year"])
 
     panel = y.merge(feats, on=["state", "year"], how="left")
     panel = panel.sort_values(["state", "year"])
@@ -129,19 +178,16 @@ def main():
     panel = panel.dropna().reset_index(drop=True)  # drops harvest year 1999 (no lag)
     assert len(panel) == 13 * 26, f"expected 338 rows, got {len(panel)}"
 
-    # ---- leakage audit ----
-    used = [("spring", m) for m in spring_months] + \
-           [("winter(prevOct-Dec)", m) for m in (10, 11, 12)] + \
-           [("winter(Jan-Feb)", m) for m in (1, 2)]
-    latest = max(m for name, m in used if "prevOct-Dec" not in name)
-    assert latest <= CUTOFF_MONTH, \
-        f"leak: harvest-year climate month {latest} is after the June forecast cutoff"
-    # months 7..12 of the harvest year are never used:
-    assert not any(name == "spring" and m > CUTOFF_MONTH for name, m in used), \
-        "leak: climate month after June forecast cutoff used"
-    # the Oct-Dec winter months belong to the previous calendar year (fine),
-    # and the Jan-Feb winter months are within the cutoff:
-    assert set(m for name, m in used if "prevOct-Dec" in name) == {10, 11, 12}
+    # ---- structural leakage checks on the finished panel ----
+    # (the month-window audit already ran on the real aggregation inputs above)
+    built_cols = {col for col, *_ in FEATURE_SPEC}
+    assert built_cols <= set(panel.columns), \
+        f"features declared in FEATURE_SPEC missing from panel: {built_cols - set(panel.columns)}"
+    # every climate column in the panel must come from an audited spec entry,
+    # so a hand-added feature cannot bypass the window audit
+    climate_cols = set(panel.columns) - {"state", "year", "yield_t_ha", "yield_lag1_t_ha"}
+    assert climate_cols == built_cols, \
+        f"unaudited climate columns in panel: {sorted(climate_cols - built_cols)}"
     # the target itself must not appear among the features: only the lag-1
     # yield may be derived from the yield series
     assert "yield_t_ha" in panel.columns  # target present exactly once
@@ -158,8 +204,11 @@ def main():
              "precip_winter_mm"]].to_csv(OUT, index=False)
     print(f"wrote {OUT}: {len(panel)} rows, years {panel.year.min()}..{panel.year.max()}")
     print("features:", feature_cols)
-    print("leakage audit passed: latest climate month used = June of harvest year; "
-          "no production/area columns; lag-1 yield only.")
+    latest_same_year = max(m for *_, m in audited if m is not None)
+    print(f"leakage audit passed: latest harvest-year climate month actually used = "
+          f"{latest_same_year:02d} (cutoff {CUTOFF_MONTH:02d}/30); every other month "
+          f"came from an earlier calendar year; no production/area columns; "
+          f"lag-1 yield only.")
 
 
 if __name__ == "__main__":

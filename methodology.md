@@ -18,10 +18,12 @@ The fixed forecast date matters: any feature computed from data after
   regionale Ebenen" (yields of selected agricultural crops, annual totals).
 - **Measure:** winter-wheat yield in **dt/ha** (Dezitonne per hectare),
   converted to **t/ha** by dividing by 10 (1 dt = 100 kg).
-- **Coverage:** 16 Bundesländer × 27 years (1999–2025), 432 rows, complete —
-  every cell numeric. Berlin, Hamburg and Bremen have no reported winter-wheat
-  yield (city-states with negligible production), so the modeling panel uses
-  the remaining **13 states**.
+- **Coverage:** 16 Bundesländer × 27 years (1999–2025) = 432 rows in the raw
+  export. **Not every cell is numeric:** Berlin, Hamburg and Bremen carry the
+  "." (no data) code for winter wheat in every year, as city-states with
+  negligible wheat area. The modeling panel therefore uses the remaining
+  **13 states**, for which all **351 of 351** state-year cells are numeric with
+  no gaps.
 - No harvested-area or production-quantity measure is available in this table,
   so no area-based features are used. See `data_sources.md` for acquisition
   and license details.
@@ -45,7 +47,7 @@ needed for the lag):
 
 | Feature | Definition |
 |---|---|
-| `year` | Harvest year Y (captures the long-run trend) |
+| `year` | Harvest year Y (a linear trend term — note it is extrapolated on the test years; see `limitations.md`) |
 | `yield_lag1_t_ha` | Winter-wheat yield of year Y−1, t/ha |
 | `temp_spring_C` | Mean temperature, Mar–Jun of Y |
 | `precip_spring_mm` | Total precipitation, Mar–Jun of Y |
@@ -60,14 +62,31 @@ exist yet on 30 June).
 
 ### 2.4 Leakage audit
 
-`scripts/build_dataset.py` asserts after every build:
+`scripts/build_dataset.py` audits the **actual** feature construction, not a
+restatement of it. `FEATURE_SPEC` is the single source of truth for which
+variable, month window and aggregation produces each column; the audit then
+reads back, from the climate frames that feed the aggregation, every
+`(calendar-year offset, month)` pair that actually contributed to each feature,
+and asserts each is knowable at the forecast date:
 
-1. No climate month later than June of the harvest year enters any feature.
-2. No column whose name suggests production, area, or harvest quantity exists.
-3. The only yield-derived feature is the lag-1 value.
+> a pair is admissible iff the offset is negative (an earlier, complete
+> calendar year) **or** the offset is zero and the month is ≤ June.
 
-The script prints the latest climate month used and fails loudly if any
-assertion breaks.
+Because the check is derived from the data that was aggregated, widening a
+window past the cutoff fails the build even if the documentation still claims
+otherwise. Verified by injecting July/August into the spring window, which
+raises `LEAK in temp_spring_C: month 07 of the harvest year (offset +0) is
+after the 06/30 cutoff`.
+
+Two structural assertions run on the finished panel as well:
+
+1. Every climate column present in the panel corresponds to an audited
+   `FEATURE_SPEC` entry, so a hand-added feature cannot bypass the window audit.
+2. The only yield-derived column besides the target is the lag-1 value, and no
+   production, area or harvest-quantity column exists (the source table has no
+   area measure at all, so this is structural rather than a choice).
+
+The script prints, per feature, the months and year offsets actually used.
 
 ## 3. Modeling
 
@@ -115,11 +134,25 @@ Test set (2020–2025, 78 state-years):
 | Ridge (α=100) | 0.5607 | 0.6899 | 0.2922 |
 | Random Forest (500 trees) | 0.5954 | 0.7571 | 0.1477 |
 
-Neither trained model beats the naive baseline on the holdout: Ridge is a
-touch worse (MAE 0.561 vs 0.555 t/ha) and Random Forest clearly worse
-(0.595 vs 0.555). The expanding year-based CV selected heavy regularization
-for Ridge (α=100), i.e. the data supports shrinking almost everything toward
-the dominant lag signal — and even that cannot improve on the lag itself.
+Neither trained model demonstrably improves on the persistence baseline on the 2020–2025 holdout. Ridge is a touch worse on
+point estimates (MAE 0.561 vs 0.555 t/ha) and Random Forest somewhat worse
+(0.595 vs 0.555). The expanding year-based CV selected heavy regularisation for
+Ridge (α=100), i.e. the data supports shrinking almost everything toward the
+dominant lag signal — and even that does not improve on the lag itself.
+
+**Are the gaps significant?** No. Paired comparisons of absolute error across
+the 78 test points:
+
+| Comparison | ΔMAE (t/ha) | 95% bootstrap CI | paired *t* | Wilcoxon |
+|---|---|---|---|---|
+| persistence − ridge | −0.0053 | [−0.094, +0.081] | p = 0.91 | p = 0.89 |
+| persistence − random forest | −0.0400 | [−0.136, +0.052] | p = 0.41 | p = 0.83 |
+| ridge − random forest | −0.0347 | [−0.106, +0.035] | p = 0.33 | p = 0.62 |
+
+Aggregating to the six annual means (errors within a year are correlated) gives
+p = 0.92 and p = 0.49. So the correct statement is the absence of a
+demonstrated improvement, not a demonstrated loss: with 78 points spanning six
+years, this design cannot resolve differences of this size in either direction.
 
 Permutation importance: for Ridge, the dominant feature is the lagged yield
 (+0.12 MAE when shuffled); climate features contribute an order of magnitude
@@ -140,5 +173,9 @@ features near zero or slightly negative.
 4. **Regime shifts break lag models.** The worst errors are 2025 in
    Nordrhein-Westfalen, Rheinland-Pfalz and Niedersachsen: an exceptionally
    sunny, dry spring (+2.3 to +2.6 SD sunshine vs. 2000–2024) coincided with
-   record yield jumps of +1.2 to +2.0 t/ha vs. 2024. A model anchored on
-   last year's yield cannot anticipate a break like that.
+   unusually large year-on-year increases of roughly **+0.9 to +2.0 t/ha** over
+   2024 (NRW +1.99, Niedersachsen +1.45, Rheinland-Pfalz +0.88). These were
+   *not* record yields — each of those states finished 2025 below its own
+   historical maximum, NRW closest at 97.4% of its record — and nationally the
+   2004 and 2008 seasons produced larger jumps still. A model anchored on last
+   year's yield cannot anticipate a break like that.

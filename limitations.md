@@ -27,19 +27,48 @@ What this project is, and — more importantly — what it is not.
 6. **Small effective sample.** 338 rows sounds reasonable, but with 13 states
    the *independent* time dimension is 26 years. The test set is 6 years —
    one unusual year (like 2025) moves the metrics substantially.
-7. **Random Forest overfits the panel structure.** 500 trees with unrestricted
-   depth memorize state-year patterns in training; on the chronological
-   holdout it performs worse than the baseline (R² 0.15 vs 0.32). Reported
-   as-is, not tuned away.
-8. **No spatial modeling.** States are treated as independent rows with a
+7. **Random Forest scores lowest, but not significantly so.** 500 trees with
+   unrestricted depth fit the training panel closely; on the chronological
+   holdout it has the highest MAE and lowest R² of the three (R² 0.15 vs 0.32
+   for persistence). Reported as-is, not tuned away — but the paired difference
+   in absolute error against persistence is −0.040 t/ha with a 95% bootstrap CI
+   of [−0.136, +0.052] (p = 0.41), so "overfitting" is a plausible reading of
+   the ranking, not something these 78 test points establish.
+
+8. **`year` is an extrapolated feature.** The training years are 2000–2019 and
+   the test years 2020–2025, so every test-set value of `year` lies outside the
+   range the models were fitted on. For Random Forest this is a known failure
+   mode: a tree can only split at thresholds it saw in training, so all test
+   rows fall into the terminal "latest year" leaf. The evidence is in this
+   project's own output — `outputs/tables/permutation_importance.csv` gives the
+   Random Forest a permutation importance for `year` of 5.55e-17, i.e. exactly
+   zero: shuffling it on the test set changes nothing, because the model cannot
+   use it there. The feature still consumed splits during training. It is
+   documented here rather than dropped, because removing it would change the
+   published results and this release reports the documented method as run.
+
+9. **Spring sunshine has negative permutation importance.** For both models,
+   shuffling `sun_spring_h` on the test set slightly *improves* MAE (−0.037
+   Ridge, −0.018 Random Forest). That means the learned relationship for
+   sunshine is not merely uninformative on unseen years but mildly harmful —
+   consistent with a weak signal fitted to noise in the training period.
+10. **No spatial modeling.** States are treated as independent rows with a
    shared model. Spatial autocorrelation (neighboring states sharing weather)
    is not modeled; a mixed-effects or explicitly spatial model could be a
    next step.
-9. **Single train/test split.** One chronological split (2020–2025 holdout)
-   rather than rolling-origin evaluation. The reported metrics are
-   conditional on those six years.
-10. **No uncertainty quantification.** Point forecasts only; no prediction
+11. **Single train/test split.** One chronological split (2020–2025 holdout)
+    rather than rolling-origin evaluation. The reported metrics are
+    conditional on those six years — which, given limitation 6, is the main
+    reason the model comparison is underpowered.
+12. **No uncertainty quantification.** Point forecasts only; no prediction
     intervals. A forecaster would want those.
+
+13. **The 30 June cutoff is a modelling convention, not an operational one.**
+    June climate precedes the winter-wheat harvest, so using it is not
+    statistical leakage. But DWD publishes the June monthly regional averages in
+    early July, so a forecaster standing on 30 June would not yet have the June
+    aggregate in hand. A strictly operational version would end the spring
+    window in May, or use partial-June data.
 
 ## Interpretation cautions
 

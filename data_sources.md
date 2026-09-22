@@ -9,7 +9,7 @@
 - **Export variant used:** `41241-01-03-4-B`, regional level "regionale Ebenen" (Bundesländer)
 - **Measure:** ERT001 "Hektarerträge" in **dt/ha** (converted to t/ha by dividing by 10 for modeling)
 - **Crop column used:** `Winterweizen` (first of 10 crop columns; the other 9 are ignored)
-- **Temporal coverage in this export:** 1999–2025 (27 years, complete — every year present)
+- **Temporal coverage in this export:** 1999–2025 (27 years, every year present)
 - **Geographic coverage in this export:** all 16 Bundesländer (region codes 01–16), 432 rows = 16 × 27, no duplicates
 - **Modeling panel:** 13 states — Baden-Württemberg, Bayern, Brandenburg, Hessen, Mecklenburg-Vorpommern, Niedersachsen, Nordrhein-Westfalen, Rheinland-Pfalz, Saarland, Sachsen, Sachsen-Anhalt, Schleswig-Holstein, Thüringen. Berlin, Hamburg, Bremen excluded: the export contains no winter wheat data for them ("." = no data) in any year, consistent with negligible wheat area.
 - **Completeness of the 13-state panel:** 351/351 year–state cells numeric — zero missing values.
@@ -24,7 +24,7 @@
   3. Under "ZEIT AUSWÄHLEN", choose "Alle verfügbaren Zeitangaben" (1999–2025).
   4. Restrict regions to the Bundesländer level if desired (reduces file size; full Kreise-level export exceeds the guest download limit of the portal and requires a free registered account).
   5. Download as CSV. Convert encoding to UTF-8 if needed; decimals use commas.
-- **Verification log:** 2026-09-21 — file byte-checked: 432 data rows, 13 columns (Jahr;Regionscode;Regionsname;10 crops), 27/27 years present, 351/351 numeric winter wheat cells for the 13 modeled states, value range plausible. Condition 1 (data-verification gate) cleared.
+- **Verification performed on the raw file:** 432 data rows, 13 columns (Jahr;Regionscode;Regionsname;10 crops), 27/27 years present, 351/351 numeric winter-wheat cells for the 13 modelled states, value range plausible.
 
 ## 2. Climate data (features)
 

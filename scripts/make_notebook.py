@@ -157,7 +157,10 @@ md("""## 6. Limitations (see `limitations.md` for the full list)
 *Notebook generated 2026-09-21. Data: Regionaldatenbank table 41241-01-03-4-B (Datenlizenz Deutschland – Namensnennung – Version 2.0) and DWD CDC open data.*""")
 
 nb_path = "notebooks/wheat_yield_forecasting.ipynb"
-with open(nb_path, "w") as f:
+# encoding is explicit: the notebook contains non-ASCII text (arrows, umlauts,
+# the superscript in R^2), which fails on any platform whose default encoding
+# is not UTF-8 (e.g. cp1252 on Windows).
+with open(nb_path, "w", encoding="utf-8") as f:
     nbf.write(nb, f)
 print("notebook written:", len(nb.cells), "cells")
 
