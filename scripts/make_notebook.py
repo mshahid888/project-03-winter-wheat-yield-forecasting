@@ -13,7 +13,7 @@ def code(text):
 md("""# Predicting Winter Wheat Yield Across German Federal States
 ### A pre-harvest forecasting exercise with official yield statistics and DWD climate data
 
-**The one-minute version:** Can we forecast this year's winter wheat yield per German federal state *before harvest*, using only information that is actually known by end of June — last year's yield plus spring and winter weather? I compare three approaches on strictly unseen recent years (2020–2025): a naive persistence baseline ("this year = last year"), Ridge regression, and a Random Forest. The honest answer: the naive baseline is hard to beat, and the fancier model overfits — which is itself the most useful finding.
+**The one-minute version:** Can we forecast this year's winter wheat yield per German federal state *before harvest*, using only information that is actually known by end of June — last year's yield plus spring and winter weather? I compare three approaches on strictly unseen recent years (2020–2025): a naive persistence baseline ("this year = last year"), Ridge regression, and a Random Forest. The answer on this holdout: neither trained model demonstrably improves on the naive persistence baseline — which is itself a useful finding.
 
 **Data (all real, all open):**
 - Yield: Regionaldatenbank Deutschland, table 41241-01-03-4 (Erntestatistik), winter wheat, dt/ha → t/ha, 13 Bundesländer, 1999–2025.
@@ -69,8 +69,10 @@ print("National mean yield 2000–2019: %.2f t/ha | 2020–2025: %.2f t/ha" %
 md("""## 2. Models
 
 1. **Persistence baseline** — predict this year's yield = last year's yield (per state). Zero parameters; the number every real model must beat.
-2. **Ridge regression** — linear model with L2 regularization; features standardized; `alpha=100` chosen by expanding year-based cross-validation on the training period (train 2000–2004 → validate 2005–2007, …, train through 2016 → validate 2017–2019; see `scripts/analyze.py`). The folds are built from year masks, never shuffled — the panel is state-major, so a naive row-based `TimeSeriesSplit` would fold across states instead of across years.
-3. **Random Forest** — 500 trees, `max_depth=None`, `min_samples_leaf=1`, chosen by the same expanding year-based CV.""")
+2. **Ridge regression** — linear model with L2 regularization; features standardized; `alpha=100`.
+3. **Random Forest** — the tested configuration: 500 trees, `max_depth=None`, `min_samples_leaf=1`.
+
+**Where these hyperparameters come from:** they are hard-coded in this notebook. `scripts/analyze.py` chooses them by expanding year-based cross-validation on the training period (train 2000–2004 → validate 2005–2007, …, train through 2016 → validate 2017–2019), over α ∈ {0.1, 1, 10, 100} for Ridge and n_estimators ∈ {200, 500} × max_depth ∈ {None, 6, 10} × min_samples_leaf ∈ {1, 4} for the Random Forest. The folds are built from year masks, never shuffled — the panel is state-major, so a naive row-based `TimeSeriesSplit` would fold across states instead of across years. `analyze.py` prints its selection but does not save it, so the repository holds no recorded output showing which values it chose; the values above are the ones documented in `methodology.md`. The metrics printed below match `outputs/tables/model_comparison.csv` (written by `analyze.py`) to four decimals, which is consistent with — but does not prove — `analyze.py` having selected these same values.""")
 
 code("""from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
@@ -86,9 +88,9 @@ Xtr, ytr, Xte, yte = tr[FEATURES], tr.yield_t_ha, te[FEATURES], te.yield_t_ha
 pred_base = te["yield_lag1_t_ha"].values                       # persistence
 # Scaler fitted inside the pipeline (train data only) — mirrors scripts/analyze.py
 ridge = Pipeline([("scaler", StandardScaler()),
-                  ("ridge", Ridge(alpha=100.0))]).fit(Xtr, ytr)  # alpha from year-based CV
+                  ("ridge", Ridge(alpha=100.0))]).fit(Xtr, ytr)  # hard-coded; see the Models section
 pred_ridge = ridge.predict(Xte)
-rf = RandomForestRegressor(n_estimators=500, random_state=42, n_jobs=-1).fit(Xtr, ytr)  # from year-based CV
+rf = RandomForestRegressor(n_estimators=500, random_state=42, n_jobs=-1).fit(Xtr, ytr)  # hard-coded; see the Models section
 pred_rf = rf.predict(Xte)
 
 for name, p in [("persistence", pred_base), ("ridge", pred_ridge), ("random_forest", pred_rf)]:
@@ -101,7 +103,7 @@ The full comparison table (from `scripts/analyze.py`) is saved at `outputs/table
 
 code("""print(pd.read_csv("outputs/tables/model_comparison.csv").to_string(index=False))""")
 
-md("""**Reading this honestly:** *neither* model beats the naive baseline. Ridge (MAE 0.561 t/ha) is a touch worse than simply predicting last year's yield (0.555), and the Random Forest is clearly worse (0.595, R² 0.15). With only 260 training rows and a strong autocorrelation in the target, the regularized linear model stays close to the dominant signal (the lag) but cannot improve on it, while the flexible tree ensemble overfits year-to-year noise. "The fancier models lost" is a legitimate, interview-defensible finding — it tells you the signal-to-noise ratio of this problem, not that ML "failed".""")
+md("""**Reading the results:** on the 2020–2025 holdout, *neither* trained model improves on the naive baseline. As point estimates, Ridge (MAE 0.561 t/ha) is slightly worse than simply predicting last year's yield (0.555), and the tested Random Forest configuration has the highest MAE (0.595) and the lowest R² (0.15) of the three. With only 260 training rows and strong autocorrelation in the target, the regularized linear model stays close to the dominant signal (the lag) without improving on it. This notebook does not measure training-set error, so it does not establish *why* the Random Forest scores lower: overfitting is one possible explanation, not a demonstrated one. Whether the gaps between the three models exceed noise is discussed in `methodology.md` §4; the significance tests reported there come from an analysis outside this repository and cannot be reproduced from its code.""")
 
 code("""from IPython.display import Image
 Image("outputs/figures/pred_vs_actual.png")""")
@@ -111,7 +113,7 @@ md("""## 4. What actually drives the predictions?""")
 code("""from IPython.display import Image
 Image("outputs/figures/feature_importance.png")""")
 
-md("""Permutation importance on the *test* set (how much worse MAE gets when a feature is shuffled): last year's yield dominates for both models (~0.12–0.15 t/ha). Each climate feature contributes only ~0.01 t/ha or less (spring sunshine is even slightly negative for Ridge — noise, not signal). At Bundesland-monthly resolution, weather adds a whisper on top of persistence — the climate signal mostly lives at finer spatial/temporal scales than state-monthly averages.""")
+md("""Permutation importance on the *test* set (how much worse MAE gets when a feature is shuffled): last year's yield dominates for both models (~0.12–0.15 t/ha). Each climate feature contributes about 0.02 t/ha or less, and spring sunshine is negative for both models (−0.037 Ridge, −0.018 Random Forest): shuffling it slightly *improves* test MAE. At Bundesland-monthly resolution, weather adds little on top of persistence; a plausible explanation, not tested here, is that the relevant climate signal lives at finer spatial/temporal scales than state-monthly averages.""")
 
 md("""## 5. Error analysis — where does it break?
 
@@ -119,7 +121,7 @@ Per-state test MAE shows geography matters more than the model choice:""")
 
 code("""print(pd.read_csv("outputs/tables/per_state_mae.csv").to_string(index=False))""")
 
-md("""Thüringen, Sachsen and Bayern are the most predictable (MAE ≈ 0.3–0.5 t/ha); Nordrhein-Westfalen and Schleswig-Holstein the least (≈ 0.8–1.0 t/ha) — states with higher yield levels and higher year-to-year swings. And 2025 stands out:""")
+md("""Averaged over the three models, Thüringen (0.26–0.32 t/ha) and Sachsen (0.26–0.48 t/ha) have the lowest test MAE, and Nordrhein-Westfalen (0.93–1.04 t/ha) and Schleswig-Holstein (0.67–0.87 t/ha) the highest — the two states with the highest mean yields over the 2000–2019 training period. And 2025 stands out:""")
 
 code("""print(pd.read_csv("outputs/tables/per_year_mae.csv").to_string(index=False))""")
 
@@ -133,7 +135,7 @@ for s in sorted(d25.index):
     rows.append((s, round(chg, 2), round(zsun, 1)))
 print(pd.DataFrame(rows, columns=["state", "yield_change_2024→2025_t/ha", "spring_sunshine_z"]).to_string(index=False))""")
 
-md("""**The 2025 story:** almost every state posted a sharp rebound vs 2024 (NRW +1.99 t/ha, Niedersachsen +1.45 t/ha), coinciding with an exceptional spring — sunshine +2 to +2.6σ above the 2000–2024 mean, warm and dry. Models trained on 2000–2019 had rarely seen a spring like that, so all three underpredicted the rebound. This is the classic failure mode of empirical forecasting: **regime-shift years unseen in training**. It is also why the honest conclusion is modest.""")
+md("""**The 2025 story (from the table above):** yields rose in 12 of 13 states compared with 2024, by 0.5 t/ha or more in 8 of them (largest: Nordrhein-Westfalen +1.99 t/ha, Niedersachsen +1.45 t/ha); Mecklenburg-Vorpommern fell (−0.28 t/ha). Spring sunshine was 1.7 to 2.6 standard deviations above each state's 2000–2024 mean. 2025 has the highest test MAE of the six test years for all three models (`outputs/tables/per_year_mae.csv`). The persistence baseline under-predicts every state whose yield rose, by construction; the pipeline does not save per-state predictions for Ridge or the Random Forest, so their 2025 errors by state are not shown here. A year this unusual relative to the training period is a known weak point of empirical forecasting, and it is one reason the conclusion is modest.""")
 
 code("""from IPython.display import Image
 Image("outputs/figures/residuals.png")""")
@@ -141,7 +143,7 @@ Image("outputs/figures/residuals.png")""")
 md("""## 6. Limitations (see `limitations.md` for the full list)
 
 - **Aggregation level:** Bundesland-monthly climate averages smooth away the extreme events (heat spikes, dry spells) that actually drive yield losses.
-- **Small data:** 338 rows / 260 for training — limits model complexity; RF overfitting is the direct consequence.
+- **Small data:** 338 rows / 260 for training — limits model complexity; the Random Forest's lower test scores are consistent with overfitting but do not establish it.
 - **No management data:** varieties, sowing dates, fertilizer, plant protection are unobserved and absorbed into the lagged-yield term.
 - **No area/production:** the source table has no area measure, so supply-side questions are out of scope.
 - **Stationarity assumption:** the 2025 miss shows the model assumes the future looks like the past.
