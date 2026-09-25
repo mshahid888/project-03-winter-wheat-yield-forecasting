@@ -27,13 +27,17 @@ What this project is, and — more importantly — what it is not.
 6. **Small effective sample.** 338 rows sounds reasonable, but with 13 states
    the *independent* time dimension is 26 years. The test set is 6 years —
    one unusual year (like 2025) moves the metrics substantially.
-7. **Random Forest scores lowest, but not significantly so.** 500 trees with
-   unrestricted depth fit the training panel closely; on the chronological
-   holdout it has the highest MAE and lowest R² of the three (R² 0.15 vs 0.32
-   for persistence). Reported as-is, not tuned away — but the paired difference
-   in absolute error against persistence is −0.040 t/ha with a 95% bootstrap CI
-   of [−0.136, +0.052] (p = 0.41), so "overfitting" is a plausible reading of
-   the ranking, not something these 78 test points establish.
+7. **Random Forest scores lowest, but not significantly so on the reported
+   tests.** The tested configuration (documented as 500 trees, unrestricted
+   depth, leaf size 1) has the highest MAE and lowest R² of the three on the
+   chronological holdout (R² 0.15 vs 0.32 for persistence). Reported as-is,
+   not tuned away. The paired difference in absolute error against persistence
+   is −0.040 t/ha (from `outputs/tables/model_comparison.csv`), with a reported
+   95% bootstrap CI of [−0.136, +0.052] (p = 0.41). The CI and p-value come from
+   an analysis outside this repository and cannot be reproduced from its code
+   (see *What is and isn't reproducible* in the README). The repository does not
+   record training-set error, so "overfitting" is a plausible reading of the
+   ranking, not something established here.
 
 8. **`year` is an extrapolated feature.** The training years are 2000–2019 and
    the test years 2020–2025, so every test-set value of `year` lies outside the
@@ -72,11 +76,11 @@ What this project is, and — more importantly — what it is not.
 
 ## Interpretation cautions
 
-11. **Correlation, not causation.** The sunshine/yield association in 2025 is
+14. **Correlation, not causation.** The sunshine/yield association in 2025 is
     observational. Nothing here identifies causal effects of climate on yield.
-12. **Not a production forecasting system.** No operational data pipeline, no
+15. **Not a production forecasting system.** No operational data pipeline, no
     monitoring, no retraining policy. It is a retrospective modeling study.
-13. **Climate data is post-hoc.** DWD monthly files used here were published
+16. **Climate data is post-hoc.** DWD monthly files used here were published
     after the fact; an operational 30-June forecast would rely on
     provisional/nowcast data with its own errors. The study assumes the
     climate inputs are known exactly at the cutoff.

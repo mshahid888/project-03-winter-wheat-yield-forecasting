@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software or its results, please cite it using the metadata from this file."
+type: software
+title: "Predicting Winter Wheat Yield Across German Federal States with DWD Climate Data"
+authors:
+  - given-names: Shahid
+    family-names: Nawaz
+repository-code: "https://github.com/mshahid888/project-03-winter-wheat-yield-forecasting"
+license: MIT
+abstract: >-
+  Forecasting Bundesland-level winter-wheat yield in Germany from the previous year's yield
+  and pre-harvest DWD climate aggregates, using a chronological 2020-2025 holdout and a
+  persistence baseline. Neither Ridge regression nor the tested Random Forest configuration
+  improves on the persistence baseline on the holdout. Significance tests reported in the
+  documentation, run outside this repository and not reproducible from its code, indicate
+  the differences are within noise.
+keywords:
+  - "yield forecasting"
+  - "winter wheat"
+  - "Germany"
+  - "DWD"
+  - "machine learning"
+  - "time series"
+  - "scikit-learn"

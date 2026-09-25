@@ -76,7 +76,8 @@ Because the check is derived from the data that was aggregated, widening a
 window past the cutoff fails the build even if the documentation still claims
 otherwise. Verified by injecting July/August into the spring window, which
 raises `LEAK in temp_spring_C: month 07 of the harvest year (offset +0) is
-after the 06/30 cutoff`.
+after the 06/30 cutoff`. This was a manual check, not a committed test; it was
+repeated on 2026-09-25 with the same result.
 
 Two structural assertions run on the finished panel as well:
 
@@ -114,10 +115,18 @@ The script prints, per feature, the months and year offsets actually used.
 1. **Persistence baseline** — predict `yield_lag1_t_ha`. Any model must beat
    this to justify its existence.
 2. **Ridge regression** — linear model with L2 penalty; grid over
-   α ∈ {0.1, 1, 10, 100}; selected α = 100.
+   α ∈ {0.1, 1, 10, 100}; documented selection α = 100.
 3. **Random Forest** — grid over n_estimators ∈ {200, 500},
    max_depth ∈ {None, 6, 10}, min_samples_leaf ∈ {1, 4};
-   selected: 500 trees, unrestricted depth, leaf size 1.
+   documented selection: 500 trees, unrestricted depth, leaf size 1.
+
+**Provenance of the selected values.** `scripts/analyze.py` runs these grid
+searches with the year-based folds above and prints the selected values, but
+does not save them to any output, so the repository holds no recorded evidence
+of the selection. The values listed are the documented ones. The notebook
+(`scripts/make_notebook.py`) refits exactly these hard-coded values and
+reproduces `outputs/tables/model_comparison.csv` to four decimals, which is
+consistent with, but does not prove, that `analyze.py` selected them.
 
 ### 3.4 Metrics
 
@@ -136,12 +145,19 @@ Test set (2020–2025, 78 state-years):
 
 Neither trained model demonstrably improves on the persistence baseline on the 2020–2025 holdout. Ridge is a touch worse on
 point estimates (MAE 0.561 vs 0.555 t/ha) and Random Forest somewhat worse
-(0.595 vs 0.555). The expanding year-based CV selected heavy regularisation for
-Ridge (α=100), i.e. the data supports shrinking almost everything toward the
+(0.595 vs 0.555). The documented Ridge selection is α=100, the largest value in
+the grid (heavy regularisation), i.e. shrinking almost everything toward the
 dominant lag signal — and even that does not improve on the lag itself.
 
-**Are the gaps significant?** No. Paired comparisons of absolute error across
-the 78 test points:
+**Are the gaps significant?** The reported tests say no, but note their
+provenance first. The ΔMAE column is the exact difference of the MAE values in
+`outputs/tables/model_comparison.csv`. The confidence intervals, paired *t*,
+Wilcoxon and annual-mean p-values come from an analysis run **outside this
+repository** that was not committed. No code in the repository computes them,
+scipy is not a dependency, and the per-observation predictions they need are
+not saved, so they **cannot currently be reproduced from the repository**. They
+are reported here as documented results. Paired comparisons of absolute error
+across the 78 test points, as reported:
 
 | Comparison | ΔMAE (t/ha) | 95% bootstrap CI | paired *t* | Wilcoxon |
 |---|---|---|---|---|
@@ -170,12 +186,31 @@ features near zero or slightly negative.
    yield — the signal that matters lives at daily/weekly resolution.
 3. **State means hide heterogeneity.** One number per Bundesland averages over
    very different soils and microclimates.
-4. **Regime shifts break lag models.** The worst errors are 2025 in
-   Nordrhein-Westfalen, Rheinland-Pfalz and Niedersachsen: an exceptionally
-   sunny, dry spring (+2.3 to +2.6 SD sunshine vs. 2000–2024) coincided with
-   unusually large year-on-year increases of roughly **+0.9 to +2.0 t/ha** over
-   2024 (NRW +1.99, Niedersachsen +1.45, Rheinland-Pfalz +0.88). These were
-   *not* record yields — each of those states finished 2025 below its own
-   historical maximum, NRW closest at 97.4% of its record — and nationally the
-   2004 and 2008 seasons produced larger jumps still. A model anchored on last
+4. **Regime shifts break lag models.** 2025 has the highest test MAE of the six
+   test years for all three models (`outputs/tables/per_year_mae.csv`). The
+   persistence baseline's two largest test errors are Nordrhein-Westfalen and
+   Niedersachsen in 2025; per-state predictions for Ridge and the Random Forest
+   are not saved. In Nordrhein-Westfalen, Rheinland-Pfalz and Niedersachsen an
+   exceptionally sunny, dry spring (+2.3 to +2.6 SD sunshine vs. 2000–2024)
+   coincided with unusually large year-on-year increases of roughly
+   **+0.9 to +2.0 t/ha** over 2024 (NRW +1.99, Niedersachsen +1.45,
+   Rheinland-Pfalz +0.88). These were *not* record yields — every state
+   finished 2025 below its own historical maximum, Rheinland-Pfalz closest at
+   98.3% of its record (NRW 97.4%) — and nationally the 2004 and 2008 seasons
+   produced larger jumps still. The record ratios and national jumps are derived
+   by hand from the committed data, not by a pipeline script. A model anchored on last
    year's yield cannot anticipate a break like that.
+
+## 6. Provenance of reported results
+
+The README section *What is and isn't reproducible* sorts every reported result
+into three categories. In short:
+
+- **A. Generated by code in this repository:** the panel and the leakage audit
+  (re-run and reproduced byte-for-byte on 2026-09-25), all tables and figures
+  in `outputs/` (not yet re-run), and the notebook.
+- **B. Derived by hand from committed files:** the ΔMAE point estimates, the
+  2025 national ranks and record ratios, and the manual leakage-injection
+  check.
+- **C. Not reproducible from this repository:** the bootstrap CIs, paired *t*,
+  Wilcoxon and annual-mean p-values in §4.
