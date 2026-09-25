@@ -1,0 +1,116 @@
+# Re-runs the full pipeline from the committed raw data and checks that the
+# regenerated panel and result tables are identical to the committed ones.
+#
+# Python 3.14 is used because it is the only interpreter version recorded in
+# this repository (the executed notebook's metadata). requirements.txt only
+# sets minimum versions, so pip resolves whatever is current at run time; the
+# resolved versions are printed and uploaded as an artifact on every run.
+# A failed comparison therefore means either a real regression or that the
+# committed results depend on library versions that are not recorded here.
+# See "Continuous integration" in README.md.
+
+name: reproduce
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Record resolved dependency versions
+        run: |
+          python --version | tee resolved-environment.txt
+          pip freeze | tee -a resolved-environment.txt
+
+      # Includes the leakage audit and the row-count assertions.
+      - name: Build dataset
+        run: python scripts/build_dataset.py
+
+      # Includes the chronological CV-fold assertions.
+      - name: Run analysis
+        run: python scripts/analyze.py
+
+      # Regenerates and executes the notebook; any cell error fails the step.
+      - name: Regenerate and execute notebook
+        run: python scripts/make_notebook.py
+
+      # Strict comparison: no tolerance, except for permutation_importance.csv
+      # (checked in the next step). Figures and the notebook are not compared
+      # byte-for-byte (image encoding and execution metadata vary by library
+      # version); their status is listed for information only.
+      - name: Compare regenerated panel and tables with committed results
+        run: |
+          echo "Figures / notebook changed (informational, not compared):"
+          git status --porcelain -- outputs/figures notebooks
+          echo
+          EXACT="data/processed outputs/tables :(exclude)outputs/tables/permutation_importance.csv"
+          git diff --stat -- $EXACT
+          git diff -- $EXACT
+          if [ -n "$(git status --porcelain -- $EXACT)" ]; then
+            echo "::error::Regenerated panel or result tables differ from the committed files (see diff above)."
+            exit 1
+          fi
+          echo "Regenerated panel and all other result tables match the committed files exactly."
+
+      # permutation_importance.csv stores unrounded floats whose last bits vary
+      # between runs (floating-point summation order), so its numeric values are
+      # compared with a tight tolerance. Columns, row order, feature names and
+      # model labels must still match exactly.
+      - name: Compare permutation importance with committed results (tolerance)
+        run: |
+          python - <<'EOF'
+          import io, subprocess, sys
+          import numpy as np
+          import pandas as pd
+
+          path = "outputs/tables/permutation_importance.csv"
+          committed = subprocess.run(["git", "show", f"HEAD:{path}"], check=True,
+                                     capture_output=True, text=True).stdout
+          ref = pd.read_csv(io.StringIO(committed))
+          new = pd.read_csv(path)
+
+          assert list(new.columns) == list(ref.columns), f"columns differ: {list(new.columns)}"
+          assert new.shape == ref.shape, f"shape differs: {new.shape} vs {ref.shape}"
+          num = ref.select_dtypes("number").columns
+          labels = [c for c in ref.columns if c not in num]
+          assert new[labels].equals(ref[labels]), "feature names, model labels or row order differ"
+
+          a, b = new[num].to_numpy(dtype=float), ref[num].to_numpy(dtype=float)
+          close = np.isclose(a, b, rtol=1e-12, atol=1e-15)
+          print(f"{path}: max |difference| = {np.max(np.abs(a - b)):.3e} "
+                f"(rtol=1e-12, atol=1e-15)")
+          if not close.all():
+              print(new[~close.all(axis=1)].to_string())
+              print(f"::error::{path} differs from the committed file beyond tolerance.")
+              sys.exit(1)
+          print(f"{path} matches the committed file within tolerance.")
+          EOF
+
+      - name: Upload regenerated outputs and environment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproduce-outputs
+          path: |
+            resolved-environment.txt
+            data/processed/
+            outputs/
+            notebooks/
