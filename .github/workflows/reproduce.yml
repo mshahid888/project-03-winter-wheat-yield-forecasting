@@ -52,21 +52,57 @@ jobs:
       - name: Regenerate and execute notebook
         run: python scripts/make_notebook.py
 
-      # Strict comparison: no tolerance. Figures and the notebook are not
-      # compared byte-for-byte (image encoding and execution metadata vary by
-      # library version); their status is listed for information only.
+      # Strict comparison: no tolerance, except for permutation_importance.csv
+      # (checked in the next step). Figures and the notebook are not compared
+      # byte-for-byte (image encoding and execution metadata vary by library
+      # version); their status is listed for information only.
       - name: Compare regenerated panel and tables with committed results
         run: |
           echo "Figures / notebook changed (informational, not compared):"
           git status --porcelain -- outputs/figures notebooks
           echo
-          git diff --stat -- data/processed outputs/tables
-          git diff -- data/processed outputs/tables
-          if [ -n "$(git status --porcelain -- data/processed outputs/tables)" ]; then
+          EXACT="data/processed outputs/tables :(exclude)outputs/tables/permutation_importance.csv"
+          git diff --stat -- $EXACT
+          git diff -- $EXACT
+          if [ -n "$(git status --porcelain -- $EXACT)" ]; then
             echo "::error::Regenerated panel or result tables differ from the committed files (see diff above)."
             exit 1
           fi
-          echo "Regenerated panel and all result tables match the committed files exactly."
+          echo "Regenerated panel and all other result tables match the committed files exactly."
+
+      # permutation_importance.csv stores unrounded floats whose last bits vary
+      # between runs (floating-point summation order), so its numeric values are
+      # compared with a tight tolerance. Columns, row order, feature names and
+      # model labels must still match exactly.
+      - name: Compare permutation importance with committed results (tolerance)
+        run: |
+          python - <<'EOF'
+          import io, subprocess, sys
+          import numpy as np
+          import pandas as pd
+
+          path = "outputs/tables/permutation_importance.csv"
+          committed = subprocess.run(["git", "show", f"HEAD:{path}"], check=True,
+                                     capture_output=True, text=True).stdout
+          ref = pd.read_csv(io.StringIO(committed))
+          new = pd.read_csv(path)
+
+          assert list(new.columns) == list(ref.columns), f"columns differ: {list(new.columns)}"
+          assert new.shape == ref.shape, f"shape differs: {new.shape} vs {ref.shape}"
+          num = ref.select_dtypes("number").columns
+          labels = [c for c in ref.columns if c not in num]
+          assert new[labels].equals(ref[labels]), "feature names, model labels or row order differ"
+
+          a, b = new[num].to_numpy(dtype=float), ref[num].to_numpy(dtype=float)
+          close = np.isclose(a, b, rtol=1e-12, atol=1e-15)
+          print(f"{path}: max |difference| = {np.max(np.abs(a - b)):.3e} "
+                f"(rtol=1e-12, atol=1e-15)")
+          if not close.all():
+              print(new[~close.all(axis=1)].to_string())
+              print(f"::error::{path} differs from the committed file beyond tolerance.")
+              sys.exit(1)
+          print(f"{path} matches the committed file within tolerance.")
+          EOF
 
       - name: Upload regenerated outputs and environment
         if: always()
